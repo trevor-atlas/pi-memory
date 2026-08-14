@@ -1,0 +1,24 @@
+{
+  "name": "pi-memory",
+  "version": "0.1.0",
+  "description": "Hermes-inspired persistent memory for Pi",
+  "type": "module",
+  "keywords": ["pi-package"],
+  "license": "UNLICENSED",
+  "engines": {
+    "node": ">=24"
+  },
+  "scripts": {
+    "test": "node --experimental-strip-types --test tests/**/*.test.ts",
+    "check": "node --experimental-strip-types --check extensions/pi-memory.ts",
+    "load-check": "node --experimental-strip-types --input-type=module -e \"const module = await import('./extensions/pi-memory.ts'); if (typeof module.default !== 'function') throw new Error('extension has no default factory'); console.log('extension factory loaded');\"",
+    "verify": "npm run check && npm test"
+  },
+  "peerDependencies": {
+    "@earendil-works/pi-coding-agent": "*"
+  },
+  "pi": {
+    "extensions": ["./extensions/pi-memory.ts"]
+  },
+  "files": ["extensions", "src", "scripts", "README.md", ".ai/ITERATING.md", "Justfile", "package.json"]
+}
