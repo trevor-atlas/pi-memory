@@ -51,6 +51,7 @@ test("backfill queues historical turns as reviewable project candidates", async 
           kind: "project_fact",
           confidence: 1,
           importance: 1,
+          evidence: "The user confirmed the project convention",
           scopeCandidate: "project",
         }];
       },

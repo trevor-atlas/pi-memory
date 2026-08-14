@@ -34,6 +34,10 @@ function stringAt(value: unknown, fallback: string, maxLength = 2_000): string {
   return typeof value === "string" && value.length > 0 ? value.slice(0, maxLength) : fallback;
 }
 
+function booleanAt(value: unknown, fallback: boolean): boolean {
+  return typeof value === "boolean" ? value : fallback;
+}
+
 const THINKING_LEVELS = new Set(["off", "minimal", "low", "medium", "high", "xhigh", "max"]);
 
 function thinkingAt(value: unknown): MemoryConfig["extractor"]["thinking"] {
@@ -94,6 +98,11 @@ export async function loadMemoryConfig(options: ConfigLoadOptions): Promise<Memo
         maxInputChars: numberAt(merged.extractor?.maxInputChars, DEFAULT_CONFIG.extractor.maxInputChars, 500, 50_000),
         maxOutputTokens: numberAt(merged.extractor?.maxOutputTokens, DEFAULT_CONFIG.extractor.maxOutputTokens, 100, 8_000),
         timeoutMs: numberAt(merged.extractor?.timeoutMs, DEFAULT_CONFIG.extractor.timeoutMs, 1_000, 120_000),
+        maxCandidates: numberAt(merged.extractor?.maxCandidates, DEFAULT_CONFIG.extractor.maxCandidates, 0, 5),
+        minConfidence: numberAt(merged.extractor?.minConfidence, DEFAULT_CONFIG.extractor.minConfidence, 0, 1),
+        minImportance: numberAt(merged.extractor?.minImportance, DEFAULT_CONFIG.extractor.minImportance, 0, 1),
+        requireEvidence: booleanAt(merged.extractor?.requireEvidence, DEFAULT_CONFIG.extractor.requireEvidence),
+        additionalInstructions: stringAt(merged.extractor?.additionalInstructions, DEFAULT_CONFIG.extractor.additionalInstructions, 2_000),
         extractorVersion: stringAt(merged.extractor?.extractorVersion, DEFAULT_CONFIG.extractor.extractorVersion, 100),
         promptVersion: stringAt(merged.extractor?.promptVersion, DEFAULT_CONFIG.extractor.promptVersion, 100),
       },

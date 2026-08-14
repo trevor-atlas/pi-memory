@@ -210,6 +210,11 @@ export interface MemoryConfig {
     maxInputChars: number;
     maxOutputTokens: number;
     timeoutMs: number;
+    maxCandidates: number;
+    minConfidence: number;
+    minImportance: number;
+    requireEvidence: boolean;
+    additionalInstructions: string;
     extractorVersion: string;
     promptVersion: string;
   };
@@ -246,8 +251,13 @@ export const DEFAULT_CONFIG: Omit<MemoryConfig, "databasePath"> = {
     maxInputChars: 12_000,
     maxOutputTokens: 1_000,
     timeoutMs: 30_000,
+    maxCandidates: 3,
+    minConfidence: 0.9,
+    minImportance: 0.75,
+    requireEvidence: true,
+    additionalInstructions: "",
     extractorVersion: "v1",
-    promptVersion: "v1",
+    promptVersion: "v2",
   },
   embedding: {
     enabled: true,

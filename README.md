@@ -20,6 +20,29 @@ just load-check
 JSON configuration from `~/.pi/agent/memory/config.json` and trusted project overrides from
 `.pi/memory.json`; the default database is `~/.pi/agent/memory/memory.sqlite`.
 
+Extraction is intentionally high precision by default. It keeps only durable preferences,
+standing instructions, project conventions, future-constraining decisions, and reusable workflow
+lessons. It requires evidence and applies configurable score and candidate-count gates. The
+optional `extractor.additionalInstructions` setting in `config.json` or a trusted `.pi/memory.json`
+adds user policy inside the fixed safety envelope:
+
+```json
+{
+  "extractor": {
+    "maxCandidates": 2,
+    "minConfidence": 0.95,
+    "minImportance": 0.85,
+    "requireEvidence": true,
+    "additionalInstructions": "Prefer workflow lessons over project facts.",
+    "promptVersion": "v3"
+  }
+}
+```
+
+`additionalInstructions` is the supported user customization point; the safety and untrusted-data
+instructions remain fixed. Bump `promptVersion` when changing extraction policy and rerunning
+historical backfill so the same sessions receive new extraction jobs.
+
 Commands include `/memory status`, `/memory pending [--all]`, `/memory review [--all]`, `/memory search <query>`,
 `/memory remember <text> --scope project|global`, `/memory backfill [--all] [--limit N]`,
 `/memory approve <id> [--all]`, `/memory reject <id> [--all]`, `/memory forget <id> [--all]`,

@@ -34,7 +34,7 @@ export class PiRemoteExtractor implements Extractor {
       throw new Error(`Extractor has no configured auth: ${this.config.provider}/${this.config.model}`);
     }
 
-    const requestText = extractorPrompt(input).slice(0, this.config.maxInputChars);
+    const requestText = extractorPrompt(input, this.config.additionalInstructions).slice(0, this.config.maxInputChars);
     const response = await this.registry.complete(
       model,
       {
@@ -59,7 +59,12 @@ export class PiRemoteExtractor implements Extractor {
       .filter((part) => part.type === "text" && typeof part.text === "string")
       .map((part) => part.text as string)
       .join("\n");
-    return parseExtractorResponse(text);
+    return parseExtractorResponse(text, {
+      maxCandidates: this.config.maxCandidates,
+      minConfidence: this.config.minConfidence,
+      minImportance: this.config.minImportance,
+      requireEvidence: this.config.requireEvidence,
+    });
   }
 }
 

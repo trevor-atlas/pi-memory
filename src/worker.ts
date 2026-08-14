@@ -106,11 +106,17 @@ export class MemoryWorker {
   private async processJob(job: StoredJob): Promise<void> {
     const signal = this.abortController.signal;
     try {
-      let candidates = job.result;
+      const validationOptions = {
+        maxCandidates: this.options.config.extractor.maxCandidates,
+        minConfidence: this.options.config.extractor.minConfidence,
+        minImportance: this.options.config.extractor.minImportance,
+        requireEvidence: this.options.config.extractor.requireEvidence,
+      };
+      let candidates = job.result ? validateMemoryCandidates(job.result, validationOptions) : undefined;
       if (!candidates) {
         const extracted = await this.options.extractor.extract(job.input, signal);
         if (signal.aborted) return;
-        candidates = validateMemoryCandidates(extracted);
+        candidates = validateMemoryCandidates(extracted, validationOptions);
         this.options.store.markExtracted(job.jobId, this.workerId, candidates, this.clock.now());
       }
 

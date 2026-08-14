@@ -36,6 +36,7 @@ test("coordinator keeps project and approved global recall separate", async () =
             kind: "project_fact",
             confidence: 1,
             importance: 1,
+            evidence: "User confirmed the project database",
             scopeCandidate: "project",
           },
           {
@@ -43,6 +44,7 @@ test("coordinator keeps project and approved global recall separate", async () =
             kind: "preference",
             confidence: 1,
             importance: 1,
+            evidence: "User said they prefer concise answers",
             scopeCandidate: "global",
           },
         ];
