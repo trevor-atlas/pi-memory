@@ -26,5 +26,7 @@ Commands include `/memory status`, `/memory pending`, `/memory search <query>`,
 
 ## Safety status
 
-This repository is not enabled as a global Pi extension until its lifecycle, persistence, redaction,
-transient-context, and failure-mode tests pass. It does not backfill existing Pi sessions by default.
+The extension is enabled as a global Pi package from this repository. Lifecycle, persistence,
+redaction, transient-context, lease-fencing, shutdown, and failure-mode tests pass. Automatic
+capture is best-effort and does not block completed turns; it does not backfill existing Pi
+sessions by default.
