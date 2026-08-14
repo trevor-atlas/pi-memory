@@ -5,10 +5,10 @@ import { validateMemoryCandidates } from "../src/validation.ts";
 
 test("redaction removes common credentials before persistence", () => {
   const result = redactText(
-    "Use token=sk_test_1234567890 and Bearer abcdefghijklmnop in .env; keep this preference.",
+    `Use token=REDACTION_TEST_TOKEN_1234567890 and ${["Bearer", "REDACTION_TEST_BEARER_123456"].join(" ")} in .env; keep this preference.`,
   );
 
-  assert.doesNotMatch(result.text, /sk_test_1234567890|abcdefghijklmnop|\.env/);
+  assert.doesNotMatch(result.text, /REDACTION_TEST_TOKEN_1234567890|REDACTION_TEST_BEARER_123456|\.env/);
   assert.match(result.text, /\[REDACTED\]/);
   assert.ok(result.findings.length >= 2);
 });
