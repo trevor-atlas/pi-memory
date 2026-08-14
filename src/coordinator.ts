@@ -310,6 +310,7 @@ export class PersistentMemoryCoordinator implements MemoryCoordinator {
             queryVector,
             this.store.listEmbeddings(this.config.embedding.model, input.projectKey, now),
             input.limit ?? this.config.recall.semanticLimit,
+            this.config.recall.semanticMinScore,
           );
         }
       } catch {

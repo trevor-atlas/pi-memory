@@ -96,10 +96,11 @@ export function semanticCandidates(
   queryVector: readonly number[],
   memories: readonly { memory: MemoryRecord; vector: readonly number[] }[],
   limit: number,
+  minScore = 0.5,
 ): SemanticCandidate[] {
   return memories
     .map(({ memory, vector }) => ({ memory, semanticScore: Math.max(0, cosineSimilarity(queryVector, vector)) }))
-    .filter((candidate) => candidate.semanticScore > 0)
+    .filter((candidate) => candidate.semanticScore >= minScore)
     .sort((left, right) => {
       if (right.semanticScore !== left.semanticScore) return right.semanticScore - left.semanticScore;
       return left.memory.id.localeCompare(right.memory.id);

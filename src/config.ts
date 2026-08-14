@@ -108,6 +108,7 @@ export async function loadMemoryConfig(options: ConfigLoadOptions): Promise<Memo
         maxChars: numberAt(merged.recall?.maxChars, DEFAULT_CONFIG.recall.maxChars, 300, 20_000),
         lexicalLimit: numberAt(merged.recall?.lexicalLimit, DEFAULT_CONFIG.recall.lexicalLimit, 1, 200),
         semanticLimit: numberAt(merged.recall?.semanticLimit, DEFAULT_CONFIG.recall.semanticLimit, 1, 200),
+        semanticMinScore: numberAt(merged.recall?.semanticMinScore, DEFAULT_CONFIG.recall.semanticMinScore, 0, 1),
       },
     },
   );

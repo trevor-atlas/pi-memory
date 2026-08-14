@@ -215,6 +215,7 @@ export interface MemoryConfig {
     maxChars: number;
     lexicalLimit: number;
     semanticLimit: number;
+    semanticMinScore: number;
   };
 }
 
@@ -250,5 +251,6 @@ export const DEFAULT_CONFIG: Omit<MemoryConfig, "databasePath"> = {
     maxChars: 4_000,
     lexicalLimit: 32,
     semanticLimit: 32,
+    semanticMinScore: 0.5,
   },
 };
