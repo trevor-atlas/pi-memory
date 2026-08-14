@@ -120,6 +120,7 @@ export interface EnqueueReceipt {
 
 export interface MemorySelector {
   id: string;
+  all?: boolean;
 }
 
 export interface MemoryStatus {
@@ -153,10 +154,16 @@ export interface MemoryCoordinator {
     sessionId: string;
   }): Promise<TransientRecall>;
   enqueueTurn(input: SettledTurnSnapshot): Promise<EnqueueReceipt>;
+  backfill(input?: { all?: boolean; maxSessions?: number }): Promise<{
+    sessionsScanned: number;
+    turnsFound: number;
+    jobsEnqueued: number;
+    jobsAlreadyQueued: number;
+  }>;
   remember(input: RememberInput): Promise<MemoryRecord>;
   forget(selector: MemorySelector): Promise<void>;
   search(input: SearchInput): Promise<readonly SearchHit[]>;
-  pending(): Promise<readonly MemoryRecord[]>;
+  pending(input?: { all?: boolean }): Promise<readonly MemoryRecord[]>;
   approve(selector: MemorySelector): Promise<MemoryRecord>;
   reject(selector: MemorySelector): Promise<void>;
   rebuild(input?: { projectKey?: string; all?: boolean }): Promise<void>;

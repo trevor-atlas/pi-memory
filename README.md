@@ -20,9 +20,11 @@ just load-check
 JSON configuration from `~/.pi/agent/memory/config.json` and trusted project overrides from
 `.pi/memory.json`; the default database is `~/.pi/agent/memory/memory.sqlite`.
 
-Commands include `/memory status`, `/memory pending`, `/memory search <query>`,
-`/memory remember <text> --scope project|global`, `/memory approve <id>`, `/memory reject <id>`,
-`/memory forget <id>`, `/memory rebuild [--all]`, `/memory pause`, and `/memory resume`.
+Commands include `/memory status`, `/memory pending [--all]`, `/memory search <query>`,
+`/memory remember <text> --scope project|global`, `/memory backfill [--all] [--limit N]`,
+`/memory approve <id> [--all]`, `/memory reject <id> [--all]`, `/memory forget <id> [--all]`,
+`/memory rebuild [--all]`, `/memory pause`, and `/memory resume`. Historical backfill scans the
+current project's Pi sessions by default and stages every extracted candidate for approval.
 
 ## Safety status
 

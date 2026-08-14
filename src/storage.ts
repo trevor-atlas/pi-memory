@@ -26,7 +26,7 @@ import type {
 } from "./types.ts";
 import type { Clock } from "./types.ts";
 
-const SCHEMA_VERSION = 1;
+const SCHEMA_VERSION = 2;
 const GLOBAL_SCOPE_KEY = "global";
 
 interface StoredJob {
@@ -35,6 +35,7 @@ interface StoredJob {
   status: CaptureJobStatus;
   attempts: number;
   result: ValidatedMemoryCandidate[] | undefined;
+  requiresApproval: boolean;
   input: ExtractorInput;
   leaseOwner?: string;
   leaseExpiresAt?: number;
@@ -55,6 +56,7 @@ interface CaptureSourceInput {
   extractorVersion: string;
   promptVersion: string;
   extractorInput: ExtractorInput;
+  requiresApproval?: boolean;
 }
 
 interface CommitEmbedding {
@@ -138,6 +140,7 @@ function jobRowToJob(row: Record<string, unknown>): StoredJob {
     status: asString(row.status) as CaptureJobStatus,
     attempts: asNumber(row.attempts),
     result: parseJson<ValidatedMemoryCandidate[] | undefined>(row.result_json, undefined),
+    requiresApproval: asNumber(row.review_required) === 1,
     input: parseJson<ExtractorInput>(row.extractor_input_json, {
       projectKey: "",
       sessionId: "",
@@ -201,10 +204,11 @@ export class SQLiteMemoryStore {
 
     const current = asNumber(this.db.prepare("PRAGMA user_version").get()?.user_version);
     if (current >= SCHEMA_VERSION) return;
-    if (current > 0) throw new Error(`Unsupported memory schema version ${current}`);
+    if (current < 0 || current > SCHEMA_VERSION) throw new Error(`Unsupported memory schema version ${current}`);
 
     withTransaction(this.db, () => {
-      this.db.exec(`
+      if (current === 0) {
+        this.db.exec(`
         CREATE TABLE capture_sources (
           source_id TEXT PRIMARY KEY,
           session_id TEXT NOT NULL,
@@ -235,6 +239,7 @@ export class SQLiteMemoryStore {
           last_error TEXT,
           created_at INTEGER NOT NULL,
           updated_at INTEGER NOT NULL,
+          review_required INTEGER NOT NULL DEFAULT 0,
           UNIQUE(source_id, extractor_version, prompt_version)
         );
         CREATE INDEX capture_jobs_ready_idx
@@ -318,6 +323,9 @@ export class SQLiteMemoryStore {
         INSERT INTO memory_settings(key, value) VALUES ('paused', 'false');
         INSERT INTO schema_meta(key, value) VALUES ('created_by', 'pi-memory');
       `);
+      } else if (current === 1) {
+        this.db.exec("ALTER TABLE capture_jobs ADD COLUMN review_required INTEGER NOT NULL DEFAULT 0;");
+      }
       this.db.exec(`PRAGMA user_version = ${SCHEMA_VERSION};`);
     });
   }
@@ -370,8 +378,8 @@ export class SQLiteMemoryStore {
         .prepare(
           `INSERT OR IGNORE INTO capture_jobs(
              job_id, source_id, status, attempts, available_at, extractor_version,
-             prompt_version, extractor_input_json, created_at, updated_at
-           ) VALUES (?, ?, 'pending', 0, ?, ?, ?, ?, ?, ?)`,
+             prompt_version, extractor_input_json, review_required, created_at, updated_at
+           ) VALUES (?, ?, 'pending', 0, ?, ?, ?, ?, ?, ?, ?)`,
         )
         .run(
           input.jobId,
@@ -380,6 +388,7 @@ export class SQLiteMemoryStore {
           input.extractorVersion,
           input.promptVersion,
           JSON.stringify(input.extractorInput),
+          input.requiresApproval ? 1 : 0,
           input.createdAt,
           input.createdAt,
         );
@@ -475,7 +484,7 @@ export class SQLiteMemoryStore {
     return withTransaction(this.db, () => {
       const lease = this.db
         .prepare(
-          `SELECT status, lease_owner, lease_expires_at
+          `SELECT status, lease_owner, lease_expires_at, review_required
            FROM capture_jobs WHERE job_id = ?`,
         )
         .get(jobId) as Record<string, unknown> | undefined;
@@ -489,6 +498,7 @@ export class SQLiteMemoryStore {
         throw new LeaseLostError(jobId);
       }
 
+      const requiresApproval = asNumber(lease.review_required) === 1;
       const records: MemoryRecord[] = [];
       for (const [candidateIndex, candidate] of candidates.entries()) {
         const scope: MemoryScope = candidate.scopeCandidate;
@@ -499,7 +509,7 @@ export class SQLiteMemoryStore {
           .get(contentHash);
         if (tombstone) continue;
         const id = randomUUID();
-        const state: MemoryState = scope === "global" ? "pending" : "active";
+        const state: MemoryState = requiresApproval || scope === "global" ? "pending" : "active";
         const approvedAt = state === "active" ? now : null;
         this.db
           .prepare(
@@ -794,13 +804,12 @@ export class SQLiteMemoryStore {
       const result = this.db
         .prepare(
           `UPDATE memories SET state = 'active', approved_at = ?, updated_at = ?
-           WHERE id = ? AND scope = 'global' AND state = 'pending'`,
+           WHERE id = ? AND state = 'pending'`,
         )
         .run(now, now, id);
       if (asNumber(result.changes) === 0) {
         const existing = this.getMemory(id);
         if (!existing) throw new Error(`Memory not found: ${id}`);
-        if (existing.scope !== "global") throw new Error("Only global pending memories require approval");
         if (existing.state !== "active") throw new Error(`Memory is not pending: ${id}`);
         return existing;
       }

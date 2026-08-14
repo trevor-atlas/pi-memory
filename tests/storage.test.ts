@@ -107,6 +107,44 @@ test("capture jobs are durable, leased, recoverable, and idempotent", async () =
   store.close();
 });
 
+test("historical project candidates stay pending until approval", async () => {
+  const store = await SQLiteMemoryStore.open(":memory:");
+  const now = 1_700_000_000_000;
+  store.enqueueCapture({
+    sourceId: "source-history",
+    jobId: "job-history",
+    sessionId: "s",
+    projectKey: "git:/repo",
+    branchId: "b",
+    entryIds: [],
+    sourceHash: "h",
+    payload: "{}",
+    createdAt: now,
+    retainUntil: now + 1000,
+    extractorVersion: "v1",
+    promptVersion: "v1",
+    extractorInput: { projectKey: "git:/repo", sessionId: "s", userText: "", assistantText: "", toolNames: [] },
+    requiresApproval: true,
+  });
+  store.claimNextJob("w", now, 1000);
+  const candidate = {
+    statement: "The project uses TypeScript",
+    normalizedStatement: "the project uses typescript",
+    kind: "project_fact" as const,
+    confidence: 1,
+    importance: 1,
+    scopeCandidate: "project" as const,
+  };
+  store.markExtracted("job-history", "w", [candidate], now + 1);
+  const [record] = store.commitJob("job-history", "w", "source-history", [candidate], [], now + 2);
+  assert.equal(record?.state, "pending");
+  assert.equal(store.searchLexical("TypeScript", "git:/repo", 10, now + 3).length, 0);
+  const approved = store.approve(record!.id, now + 4);
+  assert.equal(approved.state, "active");
+  assert.equal(store.searchLexical("TypeScript", "git:/repo", 10, now + 5).length, 1);
+  store.close();
+});
+
 test("global extracted candidates stay pending until approval", async () => {
   const store = await SQLiteMemoryStore.open(":memory:");
   const now = 1_700_000_000_000;

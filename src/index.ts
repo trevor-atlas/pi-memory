@@ -10,3 +10,4 @@ export * from "./embeddings.ts";
 export * from "./recall.ts";
 export * from "./coordinator.ts";
 export * from "./config.ts";
+export * from "./session-backfill.ts";

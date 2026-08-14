@@ -1,4 +1,5 @@
-import { randomUUID } from "node:crypto";
+import { homedir } from "node:os";
+import { join } from "node:path";
 import { buildSanitizedExtractorInput, buildSanitizedSourcePayload } from "./redaction.ts";
 import { buildTransientRecall, mergeAndRank, semanticCandidates } from "./recall.ts";
 import { SQLiteMemoryStore } from "./storage.ts";
@@ -33,6 +34,8 @@ import { isSafeMemoryText } from "./redaction.ts";
 import { MemoryWorker } from "./worker.ts";
 import { DisabledExtractor, PiRemoteExtractor, type NestedModelRegistry } from "./extractor.ts";
 import { OllamaEmbedder } from "./embeddings.ts";
+import { scanHistoricalSessions } from "./session-backfill.ts";
+import { resolveProjectKey } from "./project-key.ts";
 
 export interface MemoryCoordinatorOptions {
   config: MemoryConfig;
@@ -42,6 +45,19 @@ export interface MemoryCoordinatorOptions {
   store?: SQLiteMemoryStore;
   clock?: Clock;
   modelRegistry?: NestedModelRegistry;
+  sessionDirectory?: string;
+}
+
+export interface BackfillInput {
+  all?: boolean;
+  maxSessions?: number;
+}
+
+export interface BackfillReceipt {
+  sessionsScanned: number;
+  turnsFound: number;
+  jobsEnqueued: number;
+  jobsAlreadyQueued: number;
 }
 
 export class PersistentMemoryCoordinator implements MemoryCoordinator {
@@ -51,6 +67,7 @@ export class PersistentMemoryCoordinator implements MemoryCoordinator {
   private readonly embedder?: Embedder;
   private readonly worker: MemoryWorker;
   private readonly boundProjectKey?: string;
+  private readonly sessionDirectory: string;
   private closed = false;
 
   private readonly config: MemoryConfig;
@@ -62,9 +79,11 @@ export class PersistentMemoryCoordinator implements MemoryCoordinator {
     extractor: Extractor,
     embedder: Embedder | undefined,
     clock: Clock,
+    sessionDirectory: string,
   ) {
     this.config = config;
     this.boundProjectKey = boundProjectKey;
+    this.sessionDirectory = sessionDirectory;
     this.clock = clock;
     this.store = store;
     this.extractor = extractor;
@@ -98,6 +117,7 @@ export class PersistentMemoryCoordinator implements MemoryCoordinator {
       extractor,
       embedder,
       clock,
+      options.sessionDirectory ?? join(homedir(), ".pi", "agent", "sessions"),
     );
     store.recoverExpiredLeases(clock.now());
     store.purgeExpiredSources(clock.now());
@@ -131,45 +151,47 @@ export class PersistentMemoryCoordinator implements MemoryCoordinator {
       return { sourceId: "", jobId: "", inserted: false };
     }
 
-    const sanitized = buildSanitizedSourcePayload(input);
-    const extractorInput = buildSanitizedExtractorInput(input);
-    // The source identity describes the settled turn, not when it was observed or
-    // which extractor version happened to process it. Extractor/prompt versions belong
-    // to the job identity so a new version can reprocess the same source safely.
-    const sourceHash = sha256(
-      JSON.stringify({
-        sessionId: input.sessionId,
-        projectKey: input.projectKey,
-        branchId: input.branchId,
-        sourceEntryIds: input.sourceEntryIds,
-        userText: extractorInput.userText,
-        assistantText: extractorInput.assistantText,
-        toolNames: extractorInput.toolNames,
-      }),
-    );
-    const sourceId = stableId("capture-source", input.sessionId, input.branchId, sourceHash);
-    const jobId = stableId(
-      "capture-job",
-      sourceId,
-      this.config.extractor.extractorVersion,
-      this.config.extractor.promptVersion,
-    );
-    return this.store.enqueueCapture({
-      sourceId,
-      jobId,
-      sessionId: input.sessionId,
-      projectKey: input.projectKey,
-      branchId: input.branchId,
-      entryIds: input.sourceEntryIds,
-      turnIndex: input.turnIndex,
-      sourceHash,
-      payload: sanitized.payload,
-      createdAt: input.capturedAt,
+    return this.enqueueSnapshot(input, {
+      requiresApproval: false,
       retainUntil: input.capturedAt + this.config.sourceRetentionMs,
-      extractorVersion: this.config.extractor.extractorVersion,
-      promptVersion: this.config.extractor.promptVersion,
-      extractorInput,
     });
+  }
+
+  async backfill(input: BackfillInput = {}): Promise<BackfillReceipt> {
+    this.ensureOpen();
+    if (!this.config.enabled) throw new Error("Memory is disabled");
+    if (this.store.isPaused()) throw new Error("Memory capture is paused");
+    if (!input.all && !this.boundProjectKey) {
+      throw new Error("Historical backfill requires a bound project or an explicit all-projects request");
+    }
+
+    const sessions = await scanHistoricalSessions({
+      sessionDirectory: this.sessionDirectory,
+      projectKey: input.all ? undefined : this.boundProjectKey,
+      maxSessions: input.maxSessions,
+      resolveProjectKey,
+    });
+    let turnsFound = 0;
+    let jobsEnqueued = 0;
+    let jobsAlreadyQueued = 0;
+    const retainUntil = this.clock.now() + this.config.sourceRetentionMs;
+    for (const session of sessions) {
+      for (const turn of session.turns) {
+        turnsFound += 1;
+        const receipt = this.enqueueSnapshot(turn, {
+          requiresApproval: true,
+          retainUntil,
+        });
+        if (receipt.inserted) jobsEnqueued += 1;
+        else jobsAlreadyQueued += 1;
+      }
+    }
+    return {
+      sessionsScanned: sessions.length,
+      turnsFound,
+      jobsEnqueued,
+      jobsAlreadyQueued,
+    };
   }
 
   async remember(input: RememberInput): Promise<MemoryRecord> {
@@ -199,9 +221,9 @@ export class PersistentMemoryCoordinator implements MemoryCoordinator {
     return record;
   }
 
-  async forget(selector: { id: string }): Promise<void> {
+  async forget(selector: { id: string; all?: boolean }): Promise<void> {
     this.ensureOpen();
-    this.assertMemoryAccess(selector.id);
+    this.assertMemoryAccess(selector.id, selector.all === true);
     this.store.forget(selector.id, this.clock.now());
   }
 
@@ -210,24 +232,25 @@ export class PersistentMemoryCoordinator implements MemoryCoordinator {
     return this.searchHits(input);
   }
 
-  async pending(): Promise<readonly MemoryRecord[]> {
+  async pending(input?: { all?: boolean }): Promise<readonly MemoryRecord[]> {
     this.ensureOpen();
+    const includeAll = input?.all === true;
     return this.store
       .listPendingMemories()
-      .filter((record) => !this.boundProjectKey || record.scope === "global" || record.scopeKey === this.boundProjectKey);
+      .filter((record) => includeAll || !this.boundProjectKey || record.scope === "global" || record.scopeKey === this.boundProjectKey);
   }
 
-  async approve(selector: { id: string }): Promise<MemoryRecord> {
+  async approve(selector: { id: string; all?: boolean }): Promise<MemoryRecord> {
     this.ensureOpen();
-    this.assertMemoryAccess(selector.id);
+    this.assertMemoryAccess(selector.id, selector.all === true);
     const record = this.store.approve(selector.id, this.clock.now());
     await this.tryEmbed(record);
     return record;
   }
 
-  async reject(selector: { id: string }): Promise<void> {
+  async reject(selector: { id: string; all?: boolean }): Promise<void> {
     this.ensureOpen();
-    this.assertMemoryAccess(selector.id);
+    this.assertMemoryAccess(selector.id, selector.all === true);
     this.store.reject(selector.id, this.clock.now());
   }
 
@@ -268,6 +291,52 @@ export class PersistentMemoryCoordinator implements MemoryCoordinator {
     this.store.close();
   }
 
+  private enqueueSnapshot(
+    input: SettledTurnSnapshot,
+    options: { requiresApproval: boolean; retainUntil: number },
+  ): EnqueueReceipt {
+    const sanitized = buildSanitizedSourcePayload(input);
+    const extractorInput = buildSanitizedExtractorInput(input);
+    // The source identity describes the settled turn, not when it was observed or
+    // which extractor version happened to process it. Extractor/prompt versions belong
+    // to the job identity so a new version can reprocess the same source safely.
+    const sourceHash = sha256(
+      JSON.stringify({
+        sessionId: input.sessionId,
+        projectKey: input.projectKey,
+        branchId: input.branchId,
+        sourceEntryIds: input.sourceEntryIds,
+        userText: extractorInput.userText,
+        assistantText: extractorInput.assistantText,
+        toolNames: extractorInput.toolNames,
+      }),
+    );
+    const sourceId = stableId("capture-source", input.sessionId, input.branchId, sourceHash);
+    const jobId = stableId(
+      "capture-job",
+      sourceId,
+      this.config.extractor.extractorVersion,
+      this.config.extractor.promptVersion,
+    );
+    return this.store.enqueueCapture({
+      sourceId,
+      jobId,
+      sessionId: input.sessionId,
+      projectKey: input.projectKey,
+      branchId: input.branchId,
+      entryIds: input.sourceEntryIds,
+      turnIndex: input.turnIndex,
+      sourceHash,
+      payload: sanitized.payload,
+      createdAt: input.capturedAt,
+      retainUntil: options.retainUntil,
+      extractorVersion: this.config.extractor.extractorVersion,
+      promptVersion: this.config.extractor.promptVersion,
+      extractorInput,
+      requiresApproval: options.requiresApproval,
+    });
+  }
+
   private ensureOpen(): void {
     if (this.closed) throw new Error("Memory coordinator is shut down");
   }
@@ -278,8 +347,8 @@ export class PersistentMemoryCoordinator implements MemoryCoordinator {
     }
   }
 
-  private assertMemoryAccess(id: string): void {
-    if (!this.boundProjectKey) return;
+  private assertMemoryAccess(id: string, allowAll = false): void {
+    if (!this.boundProjectKey || allowAll) return;
     const record = this.store.getMemory(id);
     if (record && record.scope === "project" && record.scopeKey !== this.boundProjectKey) {
       throw new Error("Memory belongs to a different project");

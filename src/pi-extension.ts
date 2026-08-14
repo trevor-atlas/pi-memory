@@ -1,3 +1,5 @@
+import { homedir } from "node:os";
+import { join } from "node:path";
 import type {
   ExtensionAPI,
   ExtensionContext,
@@ -114,6 +116,14 @@ function formatHit(hit: SearchHit): string {
   return `${hit.memory.id} [${hit.memory.scope}] ${hit.memory.statement}`;
 }
 
+function parseNonNegativeFlag(parts: readonly string[], name: string): number | undefined {
+  const index = parts.findIndex((part) => part === name || part.startsWith(`${name}=`));
+  if (index < 0) return undefined;
+  const raw = parts[index]!.includes("=") ? parts[index]!.split("=", 2)[1] : parts[index + 1];
+  const value = Number(raw);
+  return Number.isInteger(value) && value >= 0 ? value : Number.NaN;
+}
+
 function snapshotTurn(
   turn: ActiveTurn,
   ctx: ExtensionContext,
@@ -156,15 +166,18 @@ export default function registerPiMemory(pi: ExtensionAPI): void {
     if (initialization) return initialization;
     initialization = (async () => {
       const projectTrusted = typeof ctx.isProjectTrusted === "function" ? ctx.isProjectTrusted() : true;
+      const home = process.env.PI_MEMORY_HOME ?? homedir();
       const config = await loadMemoryConfig({
         cwd: ctx.cwd,
-        home: process.env.PI_MEMORY_HOME,
+        home,
         projectTrusted,
       });
       const projectKey = await resolveProjectKey(ctx.cwd);
+      const configuredSessionDirectory = (ctx.sessionManager as unknown as { getSessionDir?: () => string }).getSessionDir?.();
       const coordinator = await PersistentMemoryCoordinator.open({
         config,
         projectKey,
+        sessionDirectory: configuredSessionDirectory || join(home, ".pi", "agent", "sessions"),
         modelRegistry: ctx.modelRegistry as unknown as NestedModelRegistry,
       });
       runtime = {
@@ -308,7 +321,7 @@ export default function registerPiMemory(pi: ExtensionAPI): void {
         }
 
         if (subcommand === "pending") {
-          const pending = await coordinator.pending();
+          const pending = await coordinator.pending({ all: rest.includes("--all") });
           notify(ctx, pending.length > 0 ? pending.map((record) => `${record.id} [${record.scope}] ${record.statement}`).join("\n") : "No pending memories");
           return;
         }
@@ -353,21 +366,39 @@ export default function registerPiMemory(pi: ExtensionAPI): void {
         }
 
         if (subcommand === "approve" || subcommand === "reject" || subcommand === "forget") {
-          const id = rest[0];
+          const id = rest.find((part) => part !== "--all");
+          const all = rest.includes("--all");
           if (!id) {
-            notify(ctx, `Usage: /memory ${subcommand} <id>`, "warning");
+            notify(ctx, `Usage: /memory ${subcommand} <id> [--all]`, "warning");
             return;
           }
           if (subcommand === "approve") {
-            const record = await coordinator.approve({ id });
+            const record = await coordinator.approve({ id, all });
             notify(ctx, `Approved ${record.id}`);
           } else if (subcommand === "reject") {
-            await coordinator.reject({ id });
+            await coordinator.reject({ id, all });
             notify(ctx, `Rejected ${id}`);
           } else {
-            await coordinator.forget({ id });
+            await coordinator.forget({ id, all });
             notify(ctx, `Forgot ${id}`);
           }
+          return;
+        }
+
+        if (subcommand === "backfill") {
+          const maxSessions = parseNonNegativeFlag(rest, "--limit");
+          if (Number.isNaN(maxSessions)) {
+            notify(ctx, "Usage: /memory backfill [--all] [--limit N]", "warning");
+            return;
+          }
+          const receipt = await coordinator.backfill({
+            all: rest.includes("--all"),
+            maxSessions,
+          });
+          notify(
+            ctx,
+            `Historical backfill scanned ${receipt.sessionsScanned} session${receipt.sessionsScanned === 1 ? "" : "s"}, found ${receipt.turnsFound} turn${receipt.turnsFound === 1 ? "" : "s"}, and queued ${receipt.jobsEnqueued} new extraction job${receipt.jobsEnqueued === 1 ? "" : "s"}. Review candidates with /memory pending.`,
+          );
           return;
         }
 
@@ -384,7 +415,7 @@ export default function registerPiMemory(pi: ExtensionAPI): void {
           return;
         }
 
-        notify(ctx, "Usage: /memory status|pending|search|remember|approve|reject|forget|rebuild|pause|resume", "warning");
+        notify(ctx, "Usage: /memory status|pending|search|remember|approve|reject|forget|backfill|rebuild|pause|resume", "warning");
       } catch (error) {
         notify(ctx, `Memory command failed: ${error instanceof Error ? error.message : String(error)}`, "error");
       }
