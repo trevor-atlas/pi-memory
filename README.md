@@ -24,7 +24,9 @@ Commands include `/memory status`, `/memory pending [--all]`, `/memory search <q
 `/memory remember <text> --scope project|global`, `/memory backfill [--all] [--limit N]`,
 `/memory approve <id> [--all]`, `/memory reject <id> [--all]`, `/memory forget <id> [--all]`,
 `/memory rebuild [--all]`, `/memory pause`, and `/memory resume`. Historical backfill scans the
-current project's Pi sessions by default and stages every extracted candidate for approval.
+current project's Pi sessions by default and stages every extracted candidate for approval. `--limit N`
+queues work from up to N sessions that have not already been imported, so repeated runs advance
+through the archive.
 
 ## Safety status
 

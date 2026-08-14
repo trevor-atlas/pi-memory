@@ -21,14 +21,18 @@ test("backfill queues historical turns as reviewable project candidates", async 
   const sessionDirectory = join(root, "sessions");
   await mkdir(project, { recursive: true });
   await mkdir(sessionDirectory, { recursive: true });
-  await writeFile(
-    join(sessionDirectory, "session.jsonl"),
-    [
-      JSON.stringify({ type: "session", version: 3, id: "historical-session", timestamp: "2025-01-01T00:00:00.000Z", cwd: project }),
-      JSON.stringify({ type: "message", id: "u1", parentId: null, timestamp: "2025-01-01T00:00:01.000Z", message: { role: "user", content: "What should we use?" } }),
-      JSON.stringify({ type: "message", id: "a1", parentId: "u1", timestamp: "2025-01-01T00:00:02.000Z", message: { role: "assistant", content: [{ type: "text", text: "Use TypeScript." }] } }),
-    ].join("\n") + "\n",
-  );
+  const writeSession = async (path: string, sessionId: string, userId: string, assistantId: string, userText: string) => {
+    await writeFile(
+      path,
+      [
+        JSON.stringify({ type: "session", version: 3, id: sessionId, timestamp: "2025-01-01T00:00:00.000Z", cwd: project }),
+        JSON.stringify({ type: "message", id: userId, parentId: null, timestamp: "2025-01-01T00:00:01.000Z", message: { role: "user", content: userText } }),
+        JSON.stringify({ type: "message", id: assistantId, parentId: userId, timestamp: "2025-01-01T00:00:02.000Z", message: { role: "assistant", content: [{ type: "text", text: "Use TypeScript." }] } }),
+      ].join("\n") + "\n",
+    );
+  };
+  await writeSession(join(sessionDirectory, "session.jsonl"), "historical-session", "u1", "a1", "What should we use?");
+  await writeSession(join(sessionDirectory, "z-session.jsonl"), "historical-session-2", "u2", "a2", "What should we use next?");
 
   const store = await SQLiteMemoryStore.open(":memory:");
   const projectKey = await resolveProjectKey(project);
@@ -54,8 +58,8 @@ test("backfill queues historical turns as reviewable project candidates", async 
   });
 
   try {
-    const first = await coordinator.backfill();
-    assert.deepEqual(first, { sessionsScanned: 1, turnsFound: 1, jobsEnqueued: 1, jobsAlreadyQueued: 0 });
+    const first = await coordinator.backfill({ maxSessions: 1 });
+    assert.deepEqual(first, { sessionsScanned: 1, sessionsQueued: 1, turnsFound: 1, jobsEnqueued: 1, jobsAlreadyQueued: 0 });
     await waitFor(() => store.status().pendingMemories === 1);
 
     const [pending] = await coordinator.pending();
@@ -64,8 +68,8 @@ test("backfill queues historical turns as reviewable project candidates", async 
     await coordinator.approve({ id: pending!.id });
     assert.equal(store.status().activeMemories, 1);
 
-    const second = await coordinator.backfill();
-    assert.deepEqual(second, { sessionsScanned: 1, turnsFound: 1, jobsEnqueued: 0, jobsAlreadyQueued: 1 });
+    const second = await coordinator.backfill({ maxSessions: 1 });
+    assert.deepEqual(second, { sessionsScanned: 2, sessionsQueued: 1, turnsFound: 2, jobsEnqueued: 1, jobsAlreadyQueued: 1 });
   } finally {
     await coordinator.shutdown();
     await rm(root, { recursive: true, force: true });

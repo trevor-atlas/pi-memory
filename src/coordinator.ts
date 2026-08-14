@@ -55,6 +55,7 @@ export interface BackfillInput {
 
 export interface BackfillReceipt {
   sessionsScanned: number;
+  sessionsQueued: number;
   turnsFound: number;
   jobsEnqueued: number;
   jobsAlreadyQueued: number;
@@ -165,29 +166,47 @@ export class PersistentMemoryCoordinator implements MemoryCoordinator {
       throw new Error("Historical backfill requires a bound project or an explicit all-projects request");
     }
 
+    const sessionLimit = input.maxSessions === undefined
+      ? Number.POSITIVE_INFINITY
+      : Math.max(0, Math.floor(input.maxSessions));
+    if (sessionLimit === 0) {
+      return { sessionsScanned: 0, sessionsQueued: 0, turnsFound: 0, jobsEnqueued: 0, jobsAlreadyQueued: 0 };
+    }
     const sessions = await scanHistoricalSessions({
       sessionDirectory: this.sessionDirectory,
       projectKey: input.all ? undefined : this.boundProjectKey,
-      maxSessions: input.maxSessions,
       resolveProjectKey,
     });
+    let sessionsScanned = 0;
+    let sessionsQueued = 0;
     let turnsFound = 0;
     let jobsEnqueued = 0;
     let jobsAlreadyQueued = 0;
     const retainUntil = this.clock.now() + this.config.sourceRetentionMs;
     for (const session of sessions) {
+      sessionsScanned += 1;
+      let newJobsInSession = 0;
       for (const turn of session.turns) {
         turnsFound += 1;
         const receipt = this.enqueueSnapshot(turn, {
           requiresApproval: true,
           retainUntil,
         });
-        if (receipt.inserted) jobsEnqueued += 1;
-        else jobsAlreadyQueued += 1;
+        if (receipt.inserted) {
+          jobsEnqueued += 1;
+          newJobsInSession += 1;
+        } else {
+          jobsAlreadyQueued += 1;
+        }
+      }
+      if (newJobsInSession > 0) {
+        sessionsQueued += 1;
+        if (sessionsQueued >= sessionLimit) break;
       }
     }
     return {
-      sessionsScanned: sessions.length,
+      sessionsScanned,
+      sessionsQueued,
       turnsFound,
       jobsEnqueued,
       jobsAlreadyQueued,

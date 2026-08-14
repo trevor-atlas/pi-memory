@@ -397,7 +397,7 @@ export default function registerPiMemory(pi: ExtensionAPI): void {
           });
           notify(
             ctx,
-            `Historical backfill scanned ${receipt.sessionsScanned} session${receipt.sessionsScanned === 1 ? "" : "s"}, found ${receipt.turnsFound} turn${receipt.turnsFound === 1 ? "" : "s"}, and queued ${receipt.jobsEnqueued} new extraction job${receipt.jobsEnqueued === 1 ? "" : "s"}. Review candidates with /memory pending.`,
+            `Historical backfill scanned ${receipt.sessionsScanned} session${receipt.sessionsScanned === 1 ? "" : "s"}, queued ${receipt.sessionsQueued}, found ${receipt.turnsFound} turn${receipt.turnsFound === 1 ? "" : "s"}, and added ${receipt.jobsEnqueued} new extraction job${receipt.jobsEnqueued === 1 ? "" : "s"}. Review candidates with /memory pending.`, 
           );
           return;
         }

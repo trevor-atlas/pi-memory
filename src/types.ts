@@ -156,6 +156,7 @@ export interface MemoryCoordinator {
   enqueueTurn(input: SettledTurnSnapshot): Promise<EnqueueReceipt>;
   backfill(input?: { all?: boolean; maxSessions?: number }): Promise<{
     sessionsScanned: number;
+    sessionsQueued: number;
     turnsFound: number;
     jobsEnqueued: number;
     jobsAlreadyQueued: number;
