@@ -799,6 +799,32 @@ export class SQLiteMemoryStore {
     });
   }
 
+  editPending(id: string, statement: string, normalizedStatement: string, now: number): MemoryRecord {
+    return withTransaction(this.db, () => {
+      const memory = this.getMemory(id);
+      if (!memory) throw new Error(`Memory not found: ${id}`);
+      if (memory.state !== "pending") throw new Error(`Memory is not pending: ${id}`);
+
+      const contentHash = sha256(`${memory.scope}\u001f${memory.scopeKey}\u001f${normalizedStatement}`);
+      const duplicate = this.db
+        .prepare("SELECT id FROM memories WHERE scope = ? AND scope_key = ? AND content_hash = ? AND id <> ?")
+        .get(memory.scope, memory.scopeKey, contentHash, id);
+      if (duplicate) throw new Error("Another memory already has that statement");
+
+      this.db
+        .prepare(
+          `UPDATE memories
+           SET statement = ?, normalized_statement = ?, content_hash = ?, updated_at = ?
+           WHERE id = ? AND state = 'pending'`,
+        )
+        .run(statement, normalizedStatement, contentHash, now, id);
+      this.db.prepare("DELETE FROM embeddings WHERE memory_id = ?").run(id);
+      const row = this.db.prepare("SELECT * FROM memories WHERE id = ?").get(id);
+      if (!row) throw new Error(`Memory not found after edit: ${id}`);
+      return memoryRowToRecord(row as Record<string, unknown>);
+    });
+  }
+
   approve(id: string, now: number): MemoryRecord {
     return withTransaction(this.db, () => {
       const result = this.db

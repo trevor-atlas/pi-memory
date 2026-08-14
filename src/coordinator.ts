@@ -259,6 +259,15 @@ export class PersistentMemoryCoordinator implements MemoryCoordinator {
       .filter((record) => includeAll || !this.boundProjectKey || record.scope === "global" || record.scopeKey === this.boundProjectKey);
   }
 
+  async editPending(selector: { id: string; statement: string; all?: boolean }): Promise<MemoryRecord> {
+    this.ensureOpen();
+    this.assertMemoryAccess(selector.id, selector.all === true);
+    const statement = boundedText(selector.statement, 600);
+    if (statement.length < 3) throw new Error("Memory text is empty or too short");
+    if (!isSafeMemoryText(statement)) throw new Error("Memory text contains unsafe instructions or secrets");
+    return this.store.editPending(selector.id, statement, normalizeStatement(statement), this.clock.now());
+  }
+
   async approve(selector: { id: string; all?: boolean }): Promise<MemoryRecord> {
     this.ensureOpen();
     this.assertMemoryAccess(selector.id, selector.all === true);

@@ -145,6 +145,46 @@ test("historical project candidates stay pending until approval", async () => {
   store.close();
 });
 
+test("pending memories can be edited before approval", async () => {
+  const store = await SQLiteMemoryStore.open(":memory:");
+  const now = 1_700_000_000_000;
+  store.enqueueCapture({
+    sourceId: "source-edit",
+    jobId: "job-edit",
+    sessionId: "s",
+    projectKey: "git:/repo",
+    branchId: "b",
+    entryIds: [],
+    sourceHash: "h",
+    payload: "{}",
+    createdAt: now,
+    retainUntil: now + 1000,
+    extractorVersion: "v1",
+    promptVersion: "v1",
+    extractorInput: { projectKey: "git:/repo", sessionId: "s", userText: "", assistantText: "", toolNames: [] },
+    requiresApproval: true,
+  });
+  store.claimNextJob("w", now, 1000);
+  const candidate = {
+    statement: "The project uses TypeScript",
+    normalizedStatement: "the project uses typescript",
+    kind: "project_fact" as const,
+    confidence: 1,
+    importance: 1,
+    scopeCandidate: "project" as const,
+  };
+  store.markExtracted("job-edit", "w", [candidate], now + 1);
+  const [record] = store.commitJob("job-edit", "w", "source-edit", [candidate], [], now + 2);
+  const edited = store.editPending(record!.id, "The project uses TypeScript and SQLite", "the project uses typescript and sqlite", now + 3);
+  assert.equal(edited.state, "pending");
+  assert.equal(edited.statement, "The project uses TypeScript and SQLite");
+  assert.equal(store.searchLexical("SQLite", "git:/repo", 10, now + 4).length, 0);
+  const approved = store.approve(record!.id, now + 5);
+  assert.equal(approved.statement, "The project uses TypeScript and SQLite");
+  assert.equal(store.searchLexical("SQLite", "git:/repo", 10, now + 6).length, 1);
+  store.close();
+});
+
 test("global extracted candidates stay pending until approval", async () => {
   const store = await SQLiteMemoryStore.open(":memory:");
   const now = 1_700_000_000_000;

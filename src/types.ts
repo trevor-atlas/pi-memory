@@ -165,6 +165,7 @@ export interface MemoryCoordinator {
   forget(selector: MemorySelector): Promise<void>;
   search(input: SearchInput): Promise<readonly SearchHit[]>;
   pending(input?: { all?: boolean }): Promise<readonly MemoryRecord[]>;
+  editPending(selector: MemorySelector & { statement: string }): Promise<MemoryRecord>;
   approve(selector: MemorySelector): Promise<MemoryRecord>;
   reject(selector: MemorySelector): Promise<void>;
   rebuild(input?: { projectKey?: string; all?: boolean }): Promise<void>;

@@ -10,6 +10,7 @@ import { loadMemoryConfig } from "./config.ts";
 import { PersistentMemoryCoordinator } from "./coordinator.ts";
 import { resolveProjectKey } from "./project-key.ts";
 import { truncateText } from "./text.ts";
+import { MemoryReviewList, type ReviewListAction } from "./review-ui.ts";
 import type {
   MemoryCoordinator,
   SearchHit,
@@ -122,6 +123,67 @@ function parseNonNegativeFlag(parts: readonly string[], name: string): number | 
   const raw = parts[index]!.includes("=") ? parts[index]!.split("=", 2)[1] : parts[index + 1];
   const value = Number(raw);
   return Number.isInteger(value) && value >= 0 ? value : Number.NaN;
+}
+
+async function reviewPending(
+  ctx: ExtensionCommandContext,
+  coordinator: PersistentMemoryCoordinator,
+  all: boolean,
+): Promise<void> {
+  if (ctx.mode !== "tui") {
+    notify(ctx, "Interactive memory review is available in TUI mode; use /memory pending and /memory approve in other modes.", "warning");
+    return;
+  }
+
+  let checkedIds = new Set<string>();
+  while (true) {
+    const pending = await coordinator.pending({ all });
+    if (pending.length === 0) {
+      notify(ctx, "No pending memories");
+      return;
+    }
+
+    const action = await ctx.ui.custom<ReviewListAction | null>((tui, theme, _keybindings, done) => {
+      const list = new MemoryReviewList(pending, theme, done, checkedIds);
+      return {
+        render: (width: number) => list.render(width),
+        handleInput: (data: string) => {
+          list.handleInput(data);
+          tui.requestRender();
+        },
+        invalidate: () => list.invalidate(),
+      };
+    });
+    if (!action || action.kind === "cancel") return;
+
+    if (action.kind === "edit") {
+      checkedIds = new Set(action.selectedIds);
+      const record = pending.find((candidate) => candidate.id === action.id);
+      if (!record) continue;
+      const edited = await ctx.ui.editor(`Edit pending ${record.scope} memory`, record.statement);
+      if (edited === undefined) continue;
+      try {
+        const updated = await coordinator.editPending({ id: record.id, statement: edited, all });
+        notify(ctx, `Updated ${updated.id}; it remains pending`);
+      } catch (error) {
+        notify(ctx, `Memory edit failed: ${error instanceof Error ? error.message : String(error)}`, "error");
+      }
+      continue;
+    }
+
+    checkedIds = new Set<string>();
+    let applied = 0;
+    for (const id of action.ids) {
+      try {
+        if (action.decision === "approve") await coordinator.approve({ id, all });
+        else await coordinator.reject({ id, all });
+        applied += 1;
+      } catch (error) {
+        notify(ctx, `Could not ${action.decision} ${id}: ${error instanceof Error ? error.message : String(error)}`, "error");
+      }
+    }
+    notify(ctx, `${action.decision === "approve" ? "Approved" : "Rejected"} ${applied} memor${applied === 1 ? "y" : "ies"}`);
+  }
 }
 
 function snapshotTurn(
@@ -326,6 +388,11 @@ export default function registerPiMemory(pi: ExtensionAPI): void {
           return;
         }
 
+        if (subcommand === "review") {
+          await reviewPending(ctx, coordinator, rest.includes("--all"));
+          return;
+        }
+
         if (subcommand === "search") {
           const query = rest.join(" ").trim();
           if (!query) {
@@ -415,7 +482,7 @@ export default function registerPiMemory(pi: ExtensionAPI): void {
           return;
         }
 
-        notify(ctx, "Usage: /memory status|pending|search|remember|approve|reject|forget|backfill|rebuild|pause|resume", "warning");
+        notify(ctx, "Usage: /memory status|pending|review|search|remember|approve|reject|forget|backfill|rebuild|pause|resume", "warning");
       } catch (error) {
         notify(ctx, `Memory command failed: ${error instanceof Error ? error.message : String(error)}`, "error");
       }
